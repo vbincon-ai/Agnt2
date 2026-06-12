@@ -677,15 +677,14 @@ app.post("/api/chat", async (req, res): Promise<any> => {
         activeModel = "openai/gpt-4o";
         routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Задача требует внешних инструментов или веб-поиска. Когнитивная система автоматически подключила мультимодальную модель "openai/gpt-4o" с полной поддержкой вызова инструментов. Начни ответ с элегантной отметки о том, что для нахождения точной актуальной информации вы задействовали глобальные инструменты поиска и глубокого анализа данных.`;
       } else if (requiresReasoning) {
-        // High complexity query -> route to flagship reasoning model or requested flagship
-        activeModel = userRequestedModelPrefix === "openai" ? "openai/gpt-4o" : "deepseek/deepseek-r1";
+        // High complexity query -> route to flagship model WITH tool support (openai/gpt-4o or deepseek-chat)
+        // We avoid routing to deepseek-r1 in auto mode because R1 does not support tool calling, resulting in simple chat mode.
+        activeModel = userRequestedModelPrefix === "openai" ? "openai/gpt-4o" : (userRequestedModelPrefix === "deepseek" ? "deepseek/deepseek-chat" : "openai/gpt-4o");
         
-        if (userRequestedModelPrefix === "deepseek" && !lowerMsg.includes("reasoning") && !lowerMsg.includes("рассужд")) {
-          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Для максимальной глубины решения аналитической задачи система активировала модель глубокого логического рассуждения "deepseek/deepseek-r1" (DeepThink). Отметь в начале ответа, что для решения этой задачи вы запустили продвинутое поэтапное рассуждение.`;
-        } else if (userRequestedModelPrefix && userRequestedModelPrefix !== "deepseek") {
-          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Задача классифицирована как комплексная. Когнитивная система перевела выполнение на флагманскую интеллектуальную модель ${activeModel}. Вежливо отметь в начале, что вы задействовали максимальные вычислительные мощности для безупречного ответа.`;
+        if (userRequestedModelPrefix === "deepseek") {
+          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Для максимальной глубины решения аналитической задачи система активировала модель "deepseek/deepseek-chat" (V3) с полной поддержкой вызова инструментов VPS.`;
         } else {
-          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Задача классифицирована как требующая глубокого логического рассуждения. Система автоматически подобрала флагманскую модель "${activeModel}" для оптимального результата. Вежливо отметь это в начале ответа в профессиональном тоне.`;
+          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Задача классифицирована как требующая глубокого логического рассуждения. Система автоматически подобрала флагманскую модель "${activeModel}" с полным набором инструментов VPS для оптимального результата.`;
         }
       } else {
         // Low complexity -> fast, lighter model
@@ -703,20 +702,20 @@ app.post("/api/chat", async (req, res): Promise<any> => {
       if (modelSelection === "auto") {
         if (hasRouter) {
           provider = "RouterAI";
-          activeModel = requiresTools ? "openai/gpt-4o" : (requiresReasoning ? "deepseek/deepseek-r1" : "google/gemini-2.0-flash");
+          activeModel = requiresTools ? "openai/gpt-4o" : (requiresReasoning ? "openai/gpt-4o" : "google/gemini-2.0-flash");
         } else if (hasGemini) {
           provider = "Gemini";
           activeModel = "gemini-3.5-flash";
           if (userRequestedModelPrefix === "deepseek" && hasDeepSeek) {
             provider = "DeepSeek";
-            activeModel = requiresReasoning ? "deepseek-reasoning" : "deepseek-chat";
-            routingSystemInstructionOverride = `\n[ВНИМАНИЕ МАРШРУТИЗАЦИИ]: Пользователь прямо запросил DeepSeek, и соответствующий API-ключ настроен. Переключаемся на DeepSeek в качестве ручного приоритета!`;
+            activeModel = "deepseek-chat";
+            routingSystemInstructionOverride = `\n[ВНИМАНИЕ МАРШРУТИЗАЦИИ]: Пользователь прямо запросил DeepSeek, и соответствующий API-ключ настроен. Переключаемся на интеллектуальный deepseek-chat с полной поддержкой инструментов VPS!`;
           } else if (userRequestedModelPrefix === "deepseek") {
             routingSystemInstructionOverride = `\n[ВНИМАНИЕ МАРШРУТИЗАЦИИ]: Пользователь просил DeepSeek, но ключ отсутствует или RouterAI выключен. Применяется резервный Gemini Flash. Дружелюбно сообщи: "Упс, ключа для Дипсика или Роутер апи нет под рукой, поэтому взлетаем на надежном резервном Gemini!"`;
           }
         } else if (hasDeepSeek) {
           provider = "DeepSeek";
-          activeModel = requiresReasoning ? "deepseek-reasoning" : "deepseek-chat";
+          activeModel = "deepseek-chat";
         } else {
           return res.status(400).json({
             error: "Основные API-ключи (ROUTER_API_KEY или GEMINI_API_KEY) не настроены. Пожалуйста, укажите хотя бы один в Secrets."
@@ -1095,9 +1094,7 @@ app.post("/api/chat", async (req, res): Promise<any> => {
         };
 
         // Standard gemini supports function calling, use it
-        if (!isReasoning) {
-          configPayload.tools = geminiTools;
-        }
+        configPayload.tools = geminiTools;
 
         let response;
         try {

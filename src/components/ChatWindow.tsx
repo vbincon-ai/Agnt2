@@ -13,6 +13,7 @@ import {
   Database,
   CloudLightning,
   Mic,
+  Activity,
   Square,
   Play,
   Pause,
