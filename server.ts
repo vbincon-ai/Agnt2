@@ -678,10 +678,10 @@ app.post("/api/chat", async (req, res): Promise<any> => {
         routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Задача требует внешних инструментов или веб-поиска. Когнитивная система автоматически подключила мультимодальную модель "openai/gpt-4o" с полной поддержкой вызова инструментов. Начни ответ с элегантной отметки о том, что для нахождения точной актуальной информации вы задействовали глобальные инструменты поиска и глубокого анализа данных.`;
       } else if (requiresReasoning) {
         // High complexity query -> route to flagship reasoning model or requested flagship
-        activeModel = userRequestedModelPrefix === "openai" ? "openai/gpt-4o" : "deepseek/deepseek-reasoning";
+        activeModel = userRequestedModelPrefix === "openai" ? "openai/gpt-4o" : "deepseek/deepseek-r1";
         
         if (userRequestedModelPrefix === "deepseek" && !lowerMsg.includes("reasoning") && !lowerMsg.includes("рассужд")) {
-          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Для максимальной глубины решения аналитической задачи система активировала модель глубокого логического рассуждения "deepseek/deepseek-reasoning" (DeepThink). Отметь в начале ответа, что для решения этой задачи вы запустили продвинутое поэтапное рассуждение.`;
+          routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Для максимальной глубины решения аналитической задачи система активировала модель глубокого логического рассуждения "deepseek/deepseek-r1" (DeepThink). Отметь в начале ответа, что для решения этой задачи вы запустили продвинутое поэтапное рассуждение.`;
         } else if (userRequestedModelPrefix && userRequestedModelPrefix !== "deepseek") {
           routingSystemInstructionOverride = `\n[COGNITIVE ROUTING]: Задача классифицирована как комплексная. Когнитивная система перевела выполнение на флагманскую интеллектуальную модель ${activeModel}. Вежливо отметь в начале, что вы задействовали максимальные вычислительные мощности для безупречного ответа.`;
         } else {
@@ -703,7 +703,7 @@ app.post("/api/chat", async (req, res): Promise<any> => {
       if (modelSelection === "auto") {
         if (hasRouter) {
           provider = "RouterAI";
-          activeModel = requiresTools ? "openai/gpt-4o" : (requiresReasoning ? "deepseek/deepseek-reasoning" : "google/gemini-2.0-flash");
+          activeModel = requiresTools ? "openai/gpt-4o" : (requiresReasoning ? "deepseek/deepseek-r1" : "google/gemini-2.0-flash");
         } else if (hasGemini) {
           provider = "Gemini";
           activeModel = "gemini-3.5-flash";
@@ -754,7 +754,7 @@ app.post("/api/chat", async (req, res): Promise<any> => {
             activeModel = "deepseek-reasoning";
           } else if (hasRouter) {
             provider = "RouterAI";
-            activeModel = "deepseek/deepseek-reasoning";
+            activeModel = "deepseek/deepseek-r1";
           } else if (hasGemini) {
             provider = "Gemini";
             activeModel = "gemini-3.5-flash";
@@ -1077,11 +1077,24 @@ app.post("/api/chat", async (req, res): Promise<any> => {
           configPayload.tools = geminiTools;
         }
 
-        const response = await client.models.generateContent({
-          model: activeModel,
-          contents: geminiContents,
-          config: configPayload
-        });
+        let response;
+        try {
+          response = await client.models.generateContent({
+            model: activeModel,
+            contents: geminiContents,
+            config: configPayload
+          });
+        } catch (geminiErr: any) {
+          console.error("Gemini API generation failed:", geminiErr);
+          if (hasRouter) {
+            console.warn("Gemini is currently overloaded or failing. Automatically falling back to RouterAI...");
+            provider = "RouterAI";
+            activeModel = "google/gemini-2.0-flash";
+            iteration--;
+            continue;
+          }
+          throw new Error(`Сервис Gemini временно перегружен или недоступен (503). Ссылка на причину: ${geminiErr.message || geminiErr}`);
+        }
 
         totalDuration += Math.round((Date.now() - startTime) / 1000);
         finalContent = response.text || "";

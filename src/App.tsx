@@ -313,8 +313,20 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Ошибка при генерации ответа ассистентом In-Con.");
+        let errMsg = "Ошибка при генерации ответа ассистентом In-Con.";
+        try {
+          const contentType = res.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const errData = await res.json();
+            errMsg = errData.error || errMsg;
+          } else {
+            const textHTML = await res.text();
+            errMsg = `Ошибка сервера (${res.status}): ${textHTML.substring(0, 150)}`;
+          }
+        } catch (e) {
+          errMsg = `Ошибка HTTP ${res.status}`;
+        }
+        throw new Error(errMsg);
       }
 
       const data = await res.json();
